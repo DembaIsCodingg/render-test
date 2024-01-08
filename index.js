@@ -1,7 +1,9 @@
+require('dotenv').config()
+
 const express = require('express')
 const morgan = require('morgan')
 const cors = require('cors')
-const { v4: uuidv4 } = require('uuid');
+const Person = require('./models/person')
 
 const app = express()
 
@@ -9,91 +11,105 @@ app.use(express.json())
 app.use(cors())
 app.use(express.static('dist'))
 
-let personss =[
-    { 
-      "id": 1,
-      "name": "Arto Hellas", 
-      "number": "040-123456"
-    },
-    { 
-      "id": 2,
-      "name": "Ada Lovelace", 
-      "number": "39-44-5323523"
-    },
-    { 
-      "id": 3,
-      "name": "Dan Abramov", 
-      "number": "12-43-234345"
-    },
-    { 
-      "id": 4,
-      "name": "Mary Poppendieck", 
-      "number": "39-23-6423122"
-    }
-]
+const errorHandler = (error, request, response, next) => {
+  console.log(error.message)
+  if (error.name === 'CastError') {
+    return response.status(400).send({ error: 'wrong ID' })
+  } else if (error.name === 'ValidationError') {
+    return response.status(400).json({ error: error.message })
+  }
+
+  next(error)
+}
+
+app.use(errorHandler)
+
 morgan.token('postData', (req) => {
-    if (req.method === 'POST') {
-        return JSON.stringify(req.body);
-    }
-    return '-';
-});
-
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms :postData'));
-
-app.get('/',(request,response) =>{
-    response.end("Hello world")
+  if (req.method === 'POST') {
+    return JSON.stringify(req.body)
+  }
+  return '-'
 })
-app.get('/api/persons',(request,response) =>{
-    response.json(personss)
+
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms :postData'))
+
+console.log('dddd')
+
+app.get('/api/persons', (request, response) => {
+  Person.find({}).then((person) => {
+    response.json(person)
+  })
 })
-app.get('/info',(request,response) =>{
-    const req = new Date().toUTCString()
-    const info = `Phonebook has info for ${personss.length} people` 
+
+app.get('/info', (request, response) => {
+  const reqTime = new Date().toUTCString()
+  Person.find({}).then((persons) => {
+    const info = `Phonebook has info for ${persons.length} people`
     response.send(`
-            <div>
-                <h1>${info}</h1>
-                <p>Request received at: ${req}</p>
-            <div>
-    `);
+      <div>
+          <h1>${info}</h1>
+          <p>Request received at: ${reqTime}</p>
+      </div>
+    `)
+  })
 })
-app.get('/api/persons/:id',(request,response)=>{
-    const id = Number(request.params.id)
-    const person = personss.find(person => person.id === id )
-    if(person){
-        response.json(person)
-    }else{
-        response.status(404).end()
-    }
-   
+
+app.get('/api/persons/:id', (request, response) => {
+  Person.findById(request.params.id).then((person) => {
+    response.json(person)
+  })
 })
+
 app.delete('/api/persons/:id', (request, response) => {
-    const id = Number(request.params.id);
-    personss = personss.filter(person => person.id !== id);
-    response.status(204).end();
-  });
-  
-app.post('/api/persons',(request,response)=>{
-   const person = request.body
-    if(!person.name || !person.number){
-        return response.status(404).json({error:'Both name and number are required'})
-    }
-   if(personss.some(p => p.name === person.name)){
-    return response.status(404).json({error:'Name must be unique'})
-   }
-   console.log(`POST request received successfully!`, request.body)
- const id = uuidv4()
-
-   const newObj={
-    id,
-    name:person.name,
-    number:person.number
-   }
-   personss = personss.concat(newObj)
-
-   response.status(201).json(newObj)
-   
+  const id = request.params.id
+  Person.findOneAndDelete({ _id: id })
+    .then((result) => {
+      if (result === null) {
+        response.status(404).json({ error: 'Person not found' })
+      } else {
+        response.status(204).end()
+      }
+    })
+    .catch((error) => {
+      console.error('Error deleting person:', error)
+      response.status(500).json({ error: 'Internal server error' })
+    })
 })
-const PORT = process.env.PORT || 3001
-app.listen(PORT,()=>{
-    console.log(`Started on port ${PORT}`)
+
+app.post('/api/persons', (request, response) => {
+  console.log('POST received')
+  const body = request.body
+  if (!body.name || !body.number) {
+    return response.status(400).json({ error: 'Both name and number are required' })
+  }
+
+  const person = new Person({
+    name: body.name,
+    number: body.number
+  })
+
+  person.save().then((savedPerson) => {
+    response.json(savedPerson)
+  })
+    .catch((error) => next(error))
+})
+
+app.put('/api/persons/:id', (request, response, next) => {
+  const body = request.body
+
+  const person = {
+    name: body.name,
+    number: body.number
+  }
+
+  Person.findByIdAndUpdate(request.params.id, person, { new: true, runValidators: true, content: 'query' })
+    .then((updatedNote) => {
+      response.json(updatedNote)
+    })
+    .catch((error) => next(error))
+})
+
+const PORT = process.env.PORT || 3002
+app.listen(PORT, () => {
+  console.log(`Started on port ${PORT}`)
 })
